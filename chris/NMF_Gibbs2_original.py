@@ -4,9 +4,7 @@ import numpy as np
 import scipy.stats as ss
 import scipy as sp
 import math
-import argparse
 from operator import mul, div, eq, ne, add, ge, le, itemgetter
-import ipdb
 
 def elop(X, Y, op):
     try:
@@ -53,6 +51,7 @@ class NMF():
                 divl = div
                 div = self.div_objective()
  
+                # print str(iter) + "," + str(div)
 
                 iter += 1
 
@@ -131,6 +130,7 @@ class NMF():
             divl = div
             div = self.div_objectiveHZ()
 
+            # print "hz," + str(iter) + "," + str(div)
             iter = iter + 1
     def __str__(self):
         return self.name
@@ -217,6 +217,7 @@ class discreteGammaMixture:
             self.fitOne()
 
             self.assignZ()
+            # print str(iter) + " " + str(self.k0) + " " + str(self.theta0) + " " + str(self.k1) + " " + str(self.theta1)
             iter = iter + 1   
 
 class BayesDiscreteNMF(object):
@@ -258,27 +259,14 @@ class BayesDiscreteNMF(object):
             self.lengths = np.ones(self.C)
 
         if a is None:
-            self.a = 1e-3
-        else:
-            self.a = a
-        
+            self.a = 1.0e-3
+
         #sum constants needed for Poisson sampling
         self.ZERO_PENALTY = 100.0 #penalisation factor for observations given zero rate
         self.MAX_COPY     = 10    #maximum possible copy number
 
         if b is None:
-            self.b = 1e3
- 
-    def div_objective(self):
-        """Compute divergence of target matrix from its NMF estimate."""
-        #import ipdb; ipdb.set_trace()
-        Va = np.dot(self.eta, self.gamma)
-        Va[Va == 0] = np.finfo(Va.dtype).eps
-        
-        return (np.multiply(self.contig_counts, np.log(elop(self.contig_counts, Va, div))) - self.contig_counts + Va).sum()
-
-    def setSources(self, newSources):
-        self.sources = np.copy(newSources)
+            self.b = 1.0e3
 
     def setEta(self,newEta):
         self.eta = np.copy(newEta)
@@ -290,13 +278,12 @@ class BayesDiscreteNMF(object):
         
         iter = 0
         while (iter < self.max_iter):
-            #print np.dot(self.eta, self.gamma), iter
-            print self.div_objective()    
             self.updateSources()
-            #self.updateEta()
-            self.updateEta_johannes()
+            
+            self.updateEta()
+        
             self.updateGamma()
-            #self.updateGamma_johannes()
+    
             iter = iter + 1
 
     def updateSources(self): #update source assignments
@@ -338,16 +325,9 @@ class BayesDiscreteNMF(object):
 
                 self.eta[c,g] = self.sampleLogProb(probEta)
     
-    def updateEta_johannes_gamma(self):
-        sigma_t = self.sources.sum(axis=2)
-        alpha_t = self.a + sigma_t
-        t1 = self.gamma.sum(axis=1).T
-        beta_t = 1.0 / (self.a/self.b + t1)
-        self.eta = np.random.gamma(alpha_t, beta_t)
-
     def updateGamma(self):
         #sum up counts for each genome in each sample
-        sourceNorm = self.sources # / self.lengths[:,np.newaxis,np.newaxis]
+        sourceNorm = self.sources / self.lengths[:,np.newaxis,np.newaxis]
         SigmaG = sourceNorm.sum(axis = 0)
         
         AlphaG = self.a + SigmaG
@@ -359,80 +339,53 @@ class BayesDiscreteNMF(object):
         BetaG = 1.0/BetaG
 
         self.gamma = np.random.gamma(AlphaG, BetaG)
-    
-    def updateGamma_johannes(self):
-        # t = s
-        # nu = c
-        #sigma_s = self.sources.sum(axis=2) # sigma_t since K is S
-        sigma_nu = self.sources.sum(axis=0) # sigma_nu == sigma_s since W is C
-        # With this notation sources.shape, should == (W, ,K) == (C, G, S)
-        # correct  
-        # import ipdb; ipdb.set_trace()
-        alpha_nu = self.a + sigma_nu
-        t1_part1 = np.dot(np.ones((self.C,1)).T, self.eta)
-        t1 = np.dot((t1_part1).T , np.ones((self.S,1)).T) 
-        beta_nu = 1.0 / (self.a / self.b + t1)
-        self.gamma = np.random.gamma(alpha_nu, beta_nu)
-        print self.gamma
-        print alpha_nu*beta_nu
 
-def main(args):
+def main(argv):
     cov_file = ''
-
-    cov    = p.read_csv(args.cov_file, header=0, index_col=0)
-    counts = p.read_csv(args.count_file, header=0, index_col=0)
-
-    if args.vanilla_nmf:
-        nmf = NMF(np.array(cov.as_matrix(),dtype=np.float64),2)
     
-        nmf.factorize()
-        print nmf.W
-        nmf.discretiseW()
-    
-        np.savetxt("Z.csv", nmf.Z, delimiter=',')
-        np.savetxt("W.csv", nmf.W, delimiter=',') 
-        np.savetxt("HZ.csv", nmf.HZ, delimiter=',')
-        np.savetxt("H.csv", nmf.H, delimiter=',')
-    
-    else:
-        # More detailed priors:
-        #a_gamma = p.read_csv(args.real_gamma, header=None, index_col=False).as_matrix() 
-        bdnmf = BayesDiscreteNMF(np.array(counts.as_matrix(),dtype=np.int32),2, max_iter = 100)
+    try:
+        opts, args = getopt.getopt(argv,"hv:c:",["cov_file=","count_file="])
+    except getopt.GetoptError:
+        print 'NMF.py -v <cov_file> -c <count_file>'
+        sys.exit(2)
+    for opt, arg in opts:
+        if opt == '-h':
+            print 'NMF.py -v <cov_file>  -c <count_file>'
+            sys.exit()
+        elif opt in ("-v", "--cov_file"):
+            cov_file = arg
+        elif opt in ("-c", "--count_file"):
+            count_file = arg
 
-        max_val = counts.as_matrix().max()
-        eta_dim1 = counts.as_matrix().shape[0]
-        eta_dim2 = 2
-        gamma_dim1 = 2
-        gamma_dim2 = counts.as_matrix().shape[1]
+    cov    = p.read_csv(cov_file, header=0, index_col=0)
+    counts = p.read_csv(count_file, header=0, index_col=0)
+
+    nmf = NMF(np.array(cov.as_matrix(),dtype=np.float64),2)
+   
+    max_div_obj = -np.inf
+    max_div_nmf = None
+    for i in range(10):
         #import ipdb; ipdb.set_trace()
-        random_state = np.random.RandomState()
-        #bdnmf.setGamma(np.mat(random_state.gamma(bdnmf.a, bdnmf.b, (gamma_dim1, gamma_dim2))))
-        #bdnmf.setEta(np.mat(random_state.gamma(bdnmf.a, bdnmf.b, (eta_dim1, eta_dim2))))
-        real_sources = np.load("real_sources.npy")
-        real_gamma = p.read_csv(args.real_gamma, header=None, index_col=False)
-        real_eta = p.read_csv(args.real_eta, header=None, index_col=False)
+        nmf.factorize()
+        #import ipdb; ipdb.set_trace()
+        nmf.discretiseW()
+        if nmf.div_objective() > max_div_obj:
+            max_div_obj = nmf.div_objective()
+            max_div_nmf = nmf
+        print nmf.div_objective()
+    nmf = max_div_nmf
+    np.savetxt("Z.csv", nmf.Z, delimiter=',')
+    np.savetxt("W.csv", nmf.W, delimiter=',') 
+    np.savetxt("HZ.csv", nmf.HZ, delimiter=',')
+    np.savetxt("H.csv", nmf.H, delimiter=',')
+    
 
-        bdnmf.setSources(real_sources)
-        bdnmf.setGamma(real_gamma.as_matrix())
-        bdnmf.setEta(real_eta.as_matrix())
-        #bdnmf.setGamma(nmf.HZ)
-        #bdnmf.setEta(nmf.Z)
+    bdnmf = BayesDiscreteNMF(np.array(counts.as_matrix(),dtype=np.int32),2)
+    bdnmf.setGamma(nmf.HZ)
+    bdnmf.setEta(nmf.Z)
 
-        bdnmf.update()
-        np.savetxt("eta.csv", bdnmf.eta, delimiter=',')
-        np.savetxt("gamma.csv", bdnmf.gamma, delimiter=',')
-
+    bdnmf.update()
+    print nmf.Z -  bdnmf.eta
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--vanilla_nmf', action='store_true',
-            help="Use the regular NMF algorithm, default is the gibbs discrete NMF")
-    parser.add_argument('-v', '--cov_file', required=True,
-            help="The coverage file")
-    parser.add_argument('-c', '--count_file', required=True,
-            help="The count file")
-    parser.add_argument('--real_gamma', 
-            help="Use a fixed value for gamma")
-    parser.add_argument('--real_eta',
-            help="Use a fixed value for eta")
-    args = parser.parse_args()
-    main(args)
+    main(sys.argv[1:])
+
